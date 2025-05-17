@@ -19,12 +19,19 @@ enum ProgramErrors {
     #[error("No User Found.")]
     NoUserFound,
     #[error("STD Error: {0}")]
-    StdError(#[from] std::io::Error)
+    StdError(#[from] std::io::Error),
+    #[error("Event type was not accounted for")]
+    UncheckedEventType,
 }
-// enum EventType{
-//     CreateEvent,
-//     PublicEvent,
-// }
+enum EventType{
+    CreateEvent,
+    ForkEvent,
+    IssuesEvent,
+    PublicEvent,
+    PullRequestEvent,
+    PushEvent,
+    WatchEvent,
+}
 
 #[derive(Debug,Serialize,Deserialize,Error)]
 struct Repo{
@@ -77,7 +84,7 @@ async fn fetch_user_data(username: &String) -> std::result::Result<String,Progra
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, "JustNesh".parse().unwrap());
     let request = client.request(method, url).headers(headers).send().await?.text().await?;
-    println!("{}", request);
+    // println!("{:?}", request);
     Ok(request)
 }
 
@@ -87,7 +94,7 @@ fn get_user_input() -> std::result::Result<String,ProgramErrors>{
     stdout().flush()?;
     match stdin().read_line(&mut buffer){
         Ok(_) => {
-            if buffer.trim().to_lowercase().as_str() == "q" {
+            if (buffer.trim().to_lowercase().as_str() == "q") | (buffer.trim().to_lowercase().as_str() == "quit") {
                 println!("\nProgram has been closed successfully.");
                 std::process::exit(0);
             }
@@ -111,6 +118,83 @@ fn process_user_data(data:String, username: &String) -> std::result::Result<Valu
     Ok(json_user)
 }
 
+fn process_event_type(event_type:&str, event:&Value) -> std::result::Result<(), ProgramErrors>{
+    let event_type = match event_type {
+        "CreateEvent" => EventType::CreateEvent,
+        "ForkEvent" => EventType::ForkEvent,
+        "IssuesEvent" => EventType::IssuesEvent,
+        "PublicEvent" => EventType::PublicEvent,
+        "PullRequestEvent" => EventType::PullRequestEvent,
+        "PushEvent" => EventType::PushEvent,
+        "WatchEvent" => EventType::WatchEvent,
+        _ => return Err(ProgramErrors::UncheckedEventType),
+    };
+
+    match event_type{
+        EventType::CreateEvent => {
+            let repo_name = &event["repo"]["name"];
+            let user_name = &event["actor"]["display_login"].as_str().unwrap();
+            let ref_type = &event["payload"]["ref_type"].as_str().unwrap();
+            if ref_type == &"repository"{
+                println!("{} created a new repository named {}.", user_name,repo_name);
+            } else if ref_type == &"branch" {
+                let branch_name = &event["payload"]["ref"];
+                println!("{} created a new branch named {} in {}.", user_name,branch_name,repo_name);
+            } else {
+                println!("JUSTIN THIS IS A NEW CREATE EVENT YOU NEED TO ADD: {}", ref_type);
+            }
+        },
+        EventType::ForkEvent => {
+            let og_repo = &event["repo"]["name"];
+            let new_repo = &event["payload"]["forkee"]["full_name"];
+            let user_name = &event["actor"]["display_login"].as_str().unwrap();
+            println!("{} forked from {} to {}", user_name, og_repo, new_repo);
+        },
+        EventType::IssuesEvent => {
+            let repo_name = &event["repo"]["name"];
+            let user_name = &event["actor"]["display_login"].as_str().unwrap();
+            let issue_title = &event["payload"]["title"];
+            println!("{} opened an issue in {} with the title {}", user_name, repo_name, issue_title);
+        }
+        EventType::PublicEvent => {
+            let repo_name = &event["repo"]["name"];
+            let user_name = &event["actor"]["display_login"].as_str().unwrap();
+            println!("{} made {} public", user_name,repo_name); 
+        },
+        EventType::PullRequestEvent => {
+            let repo_name = &event["repo"]["name"];
+            let user_name = &event["actor"]["display_login"].as_str().unwrap();
+            let pull_title = &event["payload"]["title"];
+            println!("{} opened an pull request in {} with the title {}", user_name, repo_name, pull_title);            
+        }
+        EventType::PushEvent => {
+            let repo_name = &event["repo"]["name"];
+            let user_name = &event["actor"]["display_login"].as_str().unwrap();
+            let commits_array = &event["payload"]["commits"].as_array().unwrap();
+            for commit in commits_array.iter() {
+                let push_message = &commit["message"];
+                println!("{} pushed new content to {} with the message {}", user_name, repo_name, push_message);
+            }
+            println!("{} made {} public", user_name,repo_name);            
+        },
+        EventType::WatchEvent => {
+            let repo_name = &event["repo"]["name"];
+            let user_name = &event["actor"]["display_login"].as_str().unwrap();
+            println!("{} is watching {}", user_name, repo_name);
+        }
+    }
+
+    Ok(())
+}
+
+fn process_events(events: &Vec<Value>) -> std::result::Result<(), ProgramErrors>{
+        for event in events {
+            let event_type = &event["type"].as_str().unwrap();
+            process_event_type(event_type, event)?
+        }
+    Ok(())    
+}
+
 #[tokio::main]
 async fn main() {
     let program_running = true;
@@ -119,6 +203,7 @@ async fn main() {
     while program_running {
         let user_input = get_user_input();
         if let Err(e) = user_input {eprintln!("{}",e); continue};
+        println!("\n");
 
         let user_input:Vec<String> = user_input.unwrap().split(' ').map(|word| word.to_owned()).collect();
         let username =  &user_input[0];
@@ -131,9 +216,8 @@ async fn main() {
         
         let json_data = json_data.unwrap();
         let events = json_data.as_array().unwrap();
-        for event in events {
-            let event_type = &event["type"];
-            println!("Event Type:{}", event_type);
-        }
+        let processed_events = process_events(events);
+        if let Err(e) = processed_events {eprintln!("{}",e); continue};
+        println!("\n");
     }
 }
