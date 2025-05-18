@@ -26,6 +26,7 @@ enum ProgramErrors {
 enum EventType{
     CreateEvent,
     ForkEvent,
+    IssueCommentEvent,
     IssuesEvent,
     PublicEvent,
     PullRequestEvent,
@@ -122,6 +123,7 @@ fn process_event_type(event_type:&str, event:&Value) -> std::result::Result<(), 
     let event_type = match event_type {
         "CreateEvent" => EventType::CreateEvent,
         "ForkEvent" => EventType::ForkEvent,
+        "IssueCommentEvent" => EventType::IssueCommentEvent,
         "IssuesEvent" => EventType::IssuesEvent,
         "PublicEvent" => EventType::PublicEvent,
         "PullRequestEvent" => EventType::PullRequestEvent,
@@ -150,10 +152,16 @@ fn process_event_type(event_type:&str, event:&Value) -> std::result::Result<(), 
             let user_name = &event["actor"]["display_login"].as_str().unwrap();
             println!("{} forked from {} to {}", user_name, og_repo, new_repo);
         },
+        EventType::IssueCommentEvent => {
+            let repo_name = &event["payload"]["forkee"]["full_name"];
+            let user_name = &event["actor"]["display_login"].as_str().unwrap();
+            let comment_title = &event["payload"]["issue"]["title"];
+            println!("{} commented an issue in the repo {} with the title {}", user_name, repo_name, comment_title);
+        },
         EventType::IssuesEvent => {
             let repo_name = &event["repo"]["name"];
             let user_name = &event["actor"]["display_login"].as_str().unwrap();
-            let issue_title = &event["payload"]["title"];
+            let issue_title = &event["payload"]["issue"]["title"];
             println!("{} opened an issue in {} with the title {}", user_name, repo_name, issue_title);
         }
         EventType::PublicEvent => {
@@ -164,7 +172,7 @@ fn process_event_type(event_type:&str, event:&Value) -> std::result::Result<(), 
         EventType::PullRequestEvent => {
             let repo_name = &event["repo"]["name"];
             let user_name = &event["actor"]["display_login"].as_str().unwrap();
-            let pull_title = &event["payload"]["title"];
+            let pull_title = &event["payload"]["pull_request"]["title"];
             println!("{} opened an pull request in {} with the title {}", user_name, repo_name, pull_title);            
         }
         EventType::PushEvent => {
